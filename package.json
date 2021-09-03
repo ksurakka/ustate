@@ -2,7 +2,8 @@
   "name": "ustate",
   "version": "0.0.1",
   "description": "A simple state management library",
-  "main": "index.js",
+  "main": "lib/ustate.js",
+  "types": "lib/ustate.d.ts",  
   "scripts": {
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "lint": "eslint . --ext .ts",
