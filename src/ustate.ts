@@ -4,6 +4,9 @@ export function isHandlerFuncWithoutParam<TState>(handler: any): handler is Hand
   return typeof handler == 'function' && handler.length==1;
 }
 export type HandlerFuncWithParam<TState, TParam> = (state:TState, param:TParam, dispatcher: Dispatcher<any>) => TState;
+export function isHandlerFuncWithParam<TState>(handler: any): handler is HandlerFuncWithParam<TState, any> {
+  return typeof handler == 'function' && handler.length>1;
+}
 export type HandlerFunc<TState> = HandlerFuncWithParam<TState, any> | HandlerFuncWithoutParam<TState>;
 
 export type StateSelectorWithoutParam<TState, TSelectedState> = (state:TState) => TSelectedState;
@@ -55,20 +58,35 @@ export type StateMachine<TState, THandlers> = {
   dispatcher: Dispatcher<THandlers>
 }
 
+type DispatcherQueue = {
+  push: (dispatchFunc:() => void) => void;
+}
+
 function createDispatcher<TState, THandlers extends Handlers<TState>>(
   handlers:THandlers,
   getState: () => TState,
-  updateState: (newState:TState, oldState:TState) => void
+  updateState: (newState:TState, oldState:TState) => void,
+  queue: DispatcherQueue
 ): Dispatcher<THandlers> {
   const dispatcher:Dispatcher<THandlers> = Object.keys(handlers).reduce((dispatcher, key) => {
     const handler = handlers[key];
-    let dispatcherItem:DispatcherFuncWithoutParam | undefined = undefined;
+    let dispatcherItem:DispatcherFuncWithoutParam | DispatcherFuncWithParam<any> | undefined = undefined;
 
     if (isHandlerFuncWithoutParam<TState>(handler)) {
       dispatcherItem = () => {
-        const state = getState();
-        const newState = handler(state, dispatcher);
-        updateState(newState, state);
+        queue.push(() => {
+          const state = getState();
+          const newState = handler(state, dispatcher);
+          updateState(newState, state);
+        });
+      }
+    } else if (isHandlerFuncWithParam<TState>(handler)) {
+      dispatcherItem = (param:any) => {
+        queue.push(() => {
+          const state = getState();
+          const newState = handler(state, param, dispatcher);
+          updateState(newState, state);
+        });
       }
     }
 
@@ -83,12 +101,29 @@ function createDispatcher<TState, THandlers extends Handlers<TState>>(
 export function createMachine<TState, THandlers extends Handlers<TState>>(
   initialState:TState, handlers:THandlers): StateMachine<TState, THandlers> {
     let state = {...initialState};
+
+    let executing = false;
+    let queuedFuncs:(()=>void)[] = [];
+    const queue:DispatcherQueue = {      
+      push: (func:() => void) => {
+        queuedFuncs.push(func);
+        if (!executing) {
+          executing = true;          
+          while(queuedFuncs.length) {
+            const nextFunc = queuedFuncs.shift();
+            nextFunc && nextFunc();
+          }
+          executing = false;
+        }
+      }
+    }
     const dispatcher = createDispatcher(
       handlers, 
       () => state,
       (newState, oldState) => {
         state = newState;
-      }
+      },
+      queue
     );
     return {
       getState: () => state,

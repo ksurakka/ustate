@@ -25,8 +25,33 @@ test('Dispatcher func without param', () => {
     expect(m.getState().val).toBe(1);
 
     m.dispatcher.add();
-    
+
     expect(callCount).toBe(1);
     expect(m.getState().val).toBe(2);
 });
-  
+
+test('Dispatcher func with param', () => {
+    let callCount = 0;
+    const m = ustate.createMachine(
+        {
+            val: 1
+        },
+        {
+            add: (state:TestState, amount:number) => {
+                callCount++;
+                return {
+                    ...state,
+                    val: state.val+amount
+                }
+            }
+        }
+    );
+
+    expect(callCount).toBe(0);
+    expect(m.getState().val).toBe(1);
+
+    m.dispatcher.add(5);
+    
+    expect(callCount).toBe(1);
+    expect(m.getState().val).toBe(6);
+});
