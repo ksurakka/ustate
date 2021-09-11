@@ -27,11 +27,17 @@ export type NestedHandlersWithoutParam<TState, TNestedState, THandlers extends H
   selector: NestedSelectorWithoutParam<TState, TNestedState>,
   handlers: THandlers
 }
-
 export type NestedHandlersWithParam<TState, TNestedState, THandlers extends Handlers<TNestedState>, TParam> = {
   selector: NestedSelectorWithParam<TState, TNestedState, TParam>,
   handlers: THandlers
 }
+function isNestedHandlersWithoutParam<TState>(handlers:any): handlers is NestedHandlersWithoutParam<TState, any, any> {
+  return (handlers as NestedHandlersWithoutParam<TState, any, any>).selector?.length==0;
+}
+function isNestedHandlersWithParam<TState>(handlers:any): handlers is NestedHandlersWithParam<TState, any, any, any> {
+  return (handlers as NestedHandlersWithoutParam<TState, any, any>).selector?.length==1;
+}
+
 
 export type Handlers<TState> = {
   [key:string]: HandlerFunc<TState> | NestedHandlersWithoutParam<TState, any, any> | NestedHandlersWithParam<TState, any, any, any>;
@@ -68,9 +74,14 @@ function createDispatcher<TState, THandlers extends Handlers<TState>>(
   updateState: (newState:TState, oldState:TState) => void,
   queue: DispatcherQueue
 ): Dispatcher<THandlers> {
+  const nestedDispatcherCache:{
+    [key:string]: Dispatcher<any>
+  } = {};
+
   const dispatcher:Dispatcher<THandlers> = Object.keys(handlers).reduce((dispatcher, key) => {
     const handler = handlers[key];
-    let dispatcherItem:DispatcherFuncWithoutParam | DispatcherFuncWithParam<any> | undefined = undefined;
+    let dispatcherItem:DispatcherFuncWithoutParam | DispatcherFuncWithParam<any> | 
+      Dispatcher<any> | undefined = undefined;
 
     if (isHandlerFuncWithoutParam<TState>(handler)) {
       dispatcherItem = () => {
@@ -87,7 +98,44 @@ function createDispatcher<TState, THandlers extends Handlers<TState>>(
           const newState = handler(state, param, dispatcher);
           updateState(newState, state);
         });
-      }
+      } 
+    } else if (isNestedHandlersWithParam(handler)) {
+      dispatcherItem = (param:any) => {
+        const cacheKey = key+JSON.stringify(param);
+        if (!nestedDispatcherCache[cacheKey]) {
+          nestedDispatcherCache[cacheKey] = 
+            createDispatcher(
+              handler.handlers,
+              () => {
+                const selector = handler.selector(param);
+                return selector.get(getState())
+              },
+              (newNestedState) => {
+                const state = getState();
+                const selector = handler.selector(param);
+                const newState = selector.update(state,newNestedState);
+                updateState(newState as any, state)
+              },
+              queue
+            )
+        }
+        return nestedDispatcherCache[cacheKey];
+      };
+    } else if (isNestedHandlersWithoutParam(handler)) {
+      dispatcherItem = createDispatcher(
+        handler.handlers,
+        () => {
+          const selector = handler.selector();
+          return selector.get(getState())
+        },
+        (newNestedState) => {
+          const state = getState();
+          const selector = handler.selector();
+          const newState = selector.update(state,newNestedState);
+          updateState(newState as any, state)
+        },
+        queue
+      );
     }
 
     return {
