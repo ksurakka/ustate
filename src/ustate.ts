@@ -1,10 +1,13 @@
 
-export type HandlerFuncWithParam<TState, TParam> = (state:TState, param:TParam, dispatcher: Dispatcher<any>) => TState;
 export type HandlerFuncWithoutParam<TState> = (state:TState, dispatcher: Dispatcher<any>) => TState;
+export function isHandlerFuncWithoutParam<TState>(handler: any): handler is HandlerFuncWithoutParam<TState> {
+  return typeof handler == 'function' && handler.length==1;
+}
+export type HandlerFuncWithParam<TState, TParam> = (state:TState, param:TParam, dispatcher: Dispatcher<any>) => TState;
 export type HandlerFunc<TState> = HandlerFuncWithParam<TState, any> | HandlerFuncWithoutParam<TState>;
 
-export type StateSelectorWithParam<TState, TSelectedState, TParam> = (state:TState, param:TParam) => TSelectedState;
 export type StateSelectorWithoutParam<TState, TSelectedState> = (state:TState) => TSelectedState;
+export type StateSelectorWithParam<TState, TSelectedState, TParam> = (state:TState, param:TParam) => TSelectedState;
 export type StateSelector<TState, TSelectedState> = StateSelectorWithoutParam<TState, TSelectedState> | StateSelectorWithParam<TState, TSelectedState, any>;
 
 export type NestedSelectorWithoutParam<TState, TNestedState> = () => {
@@ -17,18 +20,18 @@ export type NestedSelectorWithParam<TState, TNestedState, TParam> = (param:TPara
   update: (state:TState, nestedState:TNestedState) => TState;
 }
 
-export type NestedHandlers<TState, TNestedState, THandlers extends Handlers<TNestedState>> = {
+export type NestedHandlersWithoutParam<TState, TNestedState, THandlers extends Handlers<TNestedState>> = {
   selector: NestedSelectorWithoutParam<TState, TNestedState>,
   handlers: THandlers
 }
 
-export type NestedHandlersParametrized<TState, TNestedState, THandlers extends Handlers<TNestedState>, TParam> = {
+export type NestedHandlersWithParam<TState, TNestedState, THandlers extends Handlers<TNestedState>, TParam> = {
   selector: NestedSelectorWithParam<TState, TNestedState, TParam>,
   handlers: THandlers
 }
 
 export type Handlers<TState> = {
-  [key:string]: HandlerFunc<TState> | NestedHandlers<TState, any, any> | NestedHandlersParametrized<TState, any, any, any>;
+  [key:string]: HandlerFunc<TState> | NestedHandlersWithoutParam<TState, any, any> | NestedHandlersWithParam<TState, any, any, any>;
 }
 
 export type DispatcherFuncWithParam<TParam> = (param:TParam) => void;
@@ -37,10 +40,10 @@ export type DispatcherFuncWithoutParam = () => void;
 export type Dispatcher<THandlers> = {
   [key in keyof THandlers]: THandlers[key] extends HandlerFuncWithoutParam<any> ? DispatcherFuncWithoutParam : 
     THandlers[key] extends HandlerFuncWithParam<any, infer TParam> ? DispatcherFuncWithParam<TParam> :
-    THandlers[key] extends NestedHandlers<any, any, infer TNestedHandlers> ? Dispatcher<TNestedHandlers> :
-    THandlers[key] extends NestedHandlersParametrized<any, any, infer TNestedHandlers, infer TParam> ? (param:TParam) => Dispatcher<TNestedHandlers> :
+    THandlers[key] extends NestedHandlersWithoutParam<any, any, infer TNestedHandlers> ? Dispatcher<TNestedHandlers> :
+    THandlers[key] extends NestedHandlersWithParam<any, any, infer TNestedHandlers, infer TParam> ? (param:TParam) => Dispatcher<TNestedHandlers> :
     never;
-}
+};
 
 export type ChangeListenerFunc<TState> = (state:TState, oldState:TState) => void;
 
@@ -52,9 +55,46 @@ export type StateMachine<TState, THandlers> = {
   dispatcher: Dispatcher<THandlers>
 }
 
+function createDispatcher<TState, THandlers extends Handlers<TState>>(
+  handlers:THandlers,
+  getState: () => TState,
+  updateState: (newState:TState, oldState:TState) => void
+): Dispatcher<THandlers> {
+  const dispatcher:Dispatcher<THandlers> = Object.keys(handlers).reduce((dispatcher, key) => {
+    const handler = handlers[key];
+    let dispatcherItem:DispatcherFuncWithoutParam | undefined = undefined;
+
+    if (isHandlerFuncWithoutParam<TState>(handler)) {
+      dispatcherItem = () => {
+        const state = getState();
+        const newState = handler(state, dispatcher);
+        updateState(newState, state);
+      }
+    }
+
+    return {
+      ...dispatcher,
+      ...dispatcherItem ? {[key] : dispatcherItem} : {}
+    }
+  }, {} as Dispatcher<THandlers>); // TODO: tseggaa miten voi alustaa ilman "as"
+  return dispatcher as Dispatcher<THandlers>;
+}
+
 export function createMachine<TState, THandlers extends Handlers<TState>>(
   initialState:TState, handlers:THandlers): StateMachine<TState, THandlers> {
-    return {} as StateMachine<TState, THandlers>;
+    let state = {...initialState};
+    const dispatcher = createDispatcher(
+      handlers, 
+      () => state,
+      (newState, oldState) => {
+        state = newState;
+      }
+    );
+    return {
+      getState: () => state,
+      onChange: (listener:ChangeListenerFunc<TState>) => () => undefined,
+      dispatcher: dispatcher,
+    };
 }
 
 // Testing 
@@ -131,12 +171,12 @@ const fooHandlers = {
 
 const m = createMachine(initialFooState, fooHandlers);
 const d = m.dispatcher;
-d.paramAndDispatcher(5);
-d.param(14);
-d.noParam();
-d.noParamAndDispatcher();
-d.myInner.increase(45);
-d.collection(1).decrease(12);
+// d.paramAndDispatcher(5);
+// d.param(14);
+// d.noParam();
+// d.noParamAndDispatcher();
+// d.myInner.increase(45);
+// d.collection(1).decrease(12);
 
 
 
